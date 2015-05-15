@@ -4,8 +4,9 @@
   (:import
     [java.io IOException ByteArrayInputStream]
     java.net.URI
+    org.joda.time.DateTime
+    org.joda.time.format.DateTimeFormat
     ))
-
 
 (def attendee-type "attendee")
 (def adobe-hostname "meet62145201.adobeconnect.com")
@@ -30,6 +31,19 @@
     (map (fn [[user-id meeting-id]]
            adobe-hostname)
          user-meeting-pairs)))
+
+(defn calc-cutoff
+  "for each 'start' date passed in, calculate the refund cutoff date and add it as ':refundCutoffDate'"
+  [booking-startdate-pairs]
+  (zipmap
+    (map (fn [[booking-id start]]
+           booking-id)
+         booking-startdate-pairs)
+    (map (fn [[booking-id start]]
+           ; Must calc refundCutoffDate from start, replace start with that.
+           ; Must also generate the map: {:booking-id xxx :refundCutoffDate yyy}
+           start)
+         booking-startdate-pairs)))
 
 (defn get-xml
   "returns a sample XML response, like from SuperSaaS"
@@ -100,14 +114,30 @@
                                       (list user-id (:slot-id booking))
                                       )
                                     bookings)
-          refund-cutoff-list (map (fn [{:keys [booking]}]
-                                      (list user-id (:created-on booking))
-                                      )
+          refund-cutoff-list (map (fn [{:keys [booking booking-id]}]
+                                      (list booking-id (get-in booking [:slot :start]))
+                                    )
                                     bookings)
-          ;bookings (map (assoc booking :refundCutoffDate refund-cutoff-list) bookings)
+          refund-cutoff-map (calc-cutoff refund-cutoff-list)
+          bookings2 (map (fn [{:keys [booking]}] (merge booking refund-cutoff-map)) bookings)
+          bookings3 (merge bookings refund-cutoff-map)
+          ;refund-cutoff-list {:x 5 :y 7 :z 4 :u 10 :v 12 :w 1}
+
           ; map of meeting id to host
           meeting-host-map (get-hosts learner-meeting-list)]
-      (map #(println (str "Oh happy day - " [created-on])) refund-cutoff-list)
+      ; Debug stuff - jkee:
+      ;(if (map? refund-cutoff-list) (println "refund-cutoff-list is a map"))
+      ;(if (vector? refund-cutoff-list) (println "refund-cutoff-list is a vector"))
+      ;(if (string? refund-cutoff-list) (println "refund-cutoff-list is a string"))
+      ;(if (list? refund-cutoff-list) (println "refund-cutoff-list is a list"))
+      ;(if (nil? refund-cutoff-list) (println "refund-cutoff-list is nil"))
+      ;(if (seq? refund-cutoff-list) (println "refund-cutoff-list is a seq"))
+      (println (str "bookings:\n " bookings) "\n")
+      (println (str "bookings2:\n " bookings2) "\n")
+      (println (str "bookings3:\n " bookings3) "\n")
+      (println (str "refund-cutoff-map:\n " refund-cutoff-map) "\n")
+      (doseq [item refund-cutoff-list] (prn (str "sequence item - " item)))
+
       {:results (map (partial add-links token baseuri attendee-type user-id meeting-host-map) bookings)}))
 
 
@@ -124,52 +154,29 @@
   ;                                                             #" / ")))}))
   ;                     bookings)))
 
-  ; (defn get-other-attendees
-  ;  "Retreive the other attendee for all slots
-  ;   Return the results as a single map containing {:slot-id '(email-address user-id)} pairs."
-  ;[emails slot-ids]
-  ;(reduce-appointments emails (:bookings (json/parse-string (->
-  ;                                                            (. InjectorSingleton getInjector)
-  ;                                                            (.getInstance com.livemocha.ws.scholar.Schedule)
-  ;                                                            (.getBookings slot-ids)
-  ;                                                            (.toString))
-  ;                                                          true))) )
+(defn calc-date
+  "given a date as a string, add (or subtract) num days and return the new date"
+  [start-date num]
+  (let [
+         formatter (. DateTimeFormat forPattern "yyyy-MM-dd HH:mm:ss")
+         formatter (. formatter withZoneUTC)
+         newdate (. formatter parseDateTime start-date)
+         newdate (. newdate plusDays num)
+        ;(. String valueOf \c)   ; invoke the static method String.valueOf(char) with argument 'c'
+       ]
+    newdate)
+  )
 
-  ;; Get upcoming appointments
-  ;(defn get-upcoming-learner-appointments
-  ;  " Retrieve all future bookings for the inferred user associated with join session links.
-  ;Return a vector containing either a JSON object containing upcoming appointments at index 0
-  ;or error information at index 1. "
-  ;  [{user-id :x-livemocha-user :as headers} baseuri token]
-  ;  (try
-  ;    (let [url (str (:uri supersaas-config) " / " supersaas-agenda-path)
-  ;          params (agenda-query user-id)
-  ;          {:keys [status body]} (client/get url params)]
-  ;      (cond
-  ;        (= 200 status) [(to-attendee-response-json body user-id baseuri token) nil]
-  ;        ;supersaas returns 404 when no results are found, but AEB wants empty result set response
-  ;        (= 404 status) [{:results []} nil]
-  ;        :default (do
-  ;                   (log/error (format " error [% s] response from supersaas due to unexpected problem: % s " status body))
-  ;                   [nil [500 " unknown " " Unknown error response encountered "]])))
-  ;    (catch error/is-couch-error? e
-  ;      ; generating the response for consistent logging
-  ;      (error/generate-couch-error-response e)
-  ;      [nil [500 " failed_request " " An internal request failed due to a couch exception "]])
-  ;    (catch IOException e
-  ;      (log/error " Failed to retrieve appointments from supersaas due to IOException " e)
-  ;      [nil [500 " failed_request " " An internal request failed due to an IOException "]])
-  ;    (catch Exception e
-  ;      (log/error " Failed to retrieve appointments from supersaas due to Exception " e)
-  ;      [nil [500 " failed_request " " An internal request failed due to an Exception "]])))
-
-  (defn -main
-    "Mimic what's in get-upcoming-learner-appointments."
-    [& args]
-    (let [body (get-xml)
-          user-id "12345"
-          baseuri "http://www.kee.com/"
-          token "abcd"]
-      (println (to-attendee-response-json body user-id baseuri token)))
-    ;  (println (to-json (xml/parse (string-to-stream (get-xml)))))
+(defn -main
+  "Mimic what's in get-upcoming-learner-appointments."
+  [& args]
+  (let [body (get-xml)
+        user-id "12345"
+        baseuri "http://www.kee.com/"
+        token "abcd"
+        newdate (calc-date "2015-05-15 04:00:00" -1)]
+    (println (to-attendee-response-json body user-id baseuri token))
+;    (prn (str ("\nrefund date: " newdate)))
+    (println (str "\nrefund date: \n" newdate) "\n")
     )
+  )
