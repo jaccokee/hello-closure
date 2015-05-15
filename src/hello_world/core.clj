@@ -162,9 +162,9 @@
          formatter (. formatter withZoneUTC)
          newdate (. formatter parseDateTime start-date)
          newdate (. newdate plusDays num)
-        ;(. String valueOf \c)   ; invoke the static method String.valueOf(char) with argument 'c'
+         str (. formatter print newdate)
        ]
-    newdate)
+    str)
   )
 
 (defn -main
